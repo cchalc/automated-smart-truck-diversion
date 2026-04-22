@@ -58,20 +58,40 @@ generate-pdfs:
     python scripts/generate_pdfs.py
     @echo "PDF generation complete!"
 
-# Validate generated data
+# Validate generated data (exit 0=pass, 1=errors, 2=warnings only)
 validate-data:
     @echo "Validating generated data..."
-    python scripts/validate_data.py
+    $HOME/.virtualenvs/automated-smart-truck-diversion/bin/python scripts/validate_data.py; or test $status -eq 2
+
+# Run pytest tests
+test:
+    @echo "Running pytest..."
+    $HOME/.virtualenvs/automated-smart-truck-diversion/bin/pytest tests/ -v
+
+# Run all validation (validate-data + test)
+validate-all:
+    @echo "Running data validation..."
+    $HOME/.virtualenvs/automated-smart-truck-diversion/bin/python scripts/validate_data.py; or test $status -eq 2
+    @echo ""
+    @echo "Running pytest..."
+    $HOME/.virtualenvs/automated-smart-truck-diversion/bin/pytest tests/ -v
+    @echo ""
+    @echo "All validations complete!"
+
+# Verify tables exist in Databricks
+verify-tables:
+    @echo "Verifying tables in {{CATALOG}}.{{SCHEMA}}..."
+    databricks api post /api/2.0/sql/statements --profile {{DATABRICKS_CONFIG_PROFILE}} --json '{"warehouse_id": "751fe324525584e5", "statement": "SHOW TABLES IN {{CATALOG}}.{{SCHEMA}}", "wait_timeout": "30s"}' | python -c "import json,sys; d=json.load(sys.stdin); tables=[r[1] for r in d.get('result',{}).get('data_array',[])]; print(f'Found {len(tables)} tables:'); [print(f'  - {t}') for t in sorted(tables)]"
 
 # Deploy Databricks Asset Bundle
 deploy:
     @echo "Deploying Databricks Asset Bundle..."
-    cd bundles && databricks bundle deploy --profile {{DATABRICKS_CONFIG_PROFILE}}
+    set -x DATABRICKS_TF_EXEC_PATH /tmp/terraform; set -x DATABRICKS_TF_VERSION 1.9.8; cd bundles && databricks bundle deploy --profile {{DATABRICKS_CONFIG_PROFILE}}
 
 # Run deployed jobs
 run-pipeline:
     @echo "Running data pipeline..."
-    cd bundles && databricks bundle run shovelsense_pipeline --profile {{DATABRICKS_CONFIG_PROFILE}}
+    set -x DATABRICKS_TF_EXEC_PATH /tmp/terraform; set -x DATABRICKS_TF_VERSION 1.9.8; cd bundles && databricks bundle run shovelsense_pipeline --profile {{DATABRICKS_CONFIG_PROFILE}}
 
 # Full pipeline: setup -> create-infra -> generate-data -> generate-pdfs -> deploy
 all: setup create-infra generate-data generate-pdfs deploy
