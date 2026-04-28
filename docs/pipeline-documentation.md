@@ -23,6 +23,41 @@ The pipeline implements a **medallion architecture** (Bronze → Silver → Gold
 
 ---
 
+## Unity Catalog Metadata
+
+### Available Metadata
+
+The following metadata is visible in Databricks Unity Catalog:
+
+| Metadata Type | Status | Location |
+|--------------|--------|----------|
+| **Table comments** | Available | All 25 tables have descriptive comments visible in Catalog Explorer |
+| **Table tags** | Available | `layer` (bronze/silver/gold) and `table_type` (dimension/fact/aggregate) tags |
+| **Column comments** | Code only | See note below |
+
+### Column Comments Limitation
+
+**Column comments are NOT visible in Unity Catalog** for tables in this pipeline.
+
+**Why:** Databricks Spark Declarative Pipelines creates all tables as **materialized views**, not regular Delta tables. Unity Catalog's `ALTER TABLE ALTER COLUMN ... COMMENT` syntax only works on regular tables, not views. The column metadata defined in schema definitions does not persist through the DLT materialization process.
+
+**Where column descriptions ARE documented:**
+1. **In the pipeline code** — `bundles/src/shovelsense_pipeline.py` contains explicit `StructType` schemas with column comments in metadata (e.g., `FACT_TRUCK_LOADS_SCHEMA`)
+2. **In this document** — All column descriptions are listed in the table sections below
+
+**Example from pipeline code:**
+```python
+FACT_TRUCK_LOADS_SCHEMA = StructType([
+    StructField("load_id", StringType(), True, _meta("Primary key. Unique identifier for truck load.")),
+    StructField("avg_cu_grade_pct", DoubleType(), True, _meta("Average XRF-measured copper grade across all buckets.")),
+    # ... etc
+])
+```
+
+This is a known Databricks limitation. If column comments in Unity Catalog are required, the pipeline would need to be refactored to create regular Delta tables instead of using Declarative Pipelines' default materialized view approach.
+
+---
+
 ## Data Model Diagram
 
 ```
