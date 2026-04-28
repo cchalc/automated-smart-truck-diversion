@@ -99,6 +99,11 @@ run-pipeline:
     @echo "Running data pipeline..."
     set -x DATABRICKS_TF_EXEC_PATH /tmp/terraform; set -x DATABRICKS_TF_VERSION 1.9.8; cd bundles && databricks bundle run shovelsense_pipeline --profile {{DATABRICKS_CONFIG_PROFILE}}
 
+# Apply table and column descriptions to Delta tables
+apply-metadata:
+    @echo "Applying table and column metadata..."
+    set -x CATALOG {{CATALOG}}; set -x SCHEMA {{SCHEMA}}; set -x WAREHOUSE_ID {{WAREHOUSE_ID}}; set -x DATABRICKS_CONFIG_PROFILE {{DATABRICKS_CONFIG_PROFILE}}; $HOME/.virtualenvs/automated-smart-truck-diversion/bin/python scripts/apply_table_metadata.py
+
 # Full pipeline: setup -> create-infra -> generate-data -> generate-pdfs -> deploy
 all: setup create-infra generate-data generate-pdfs deploy
     @echo "Full pipeline complete!"
