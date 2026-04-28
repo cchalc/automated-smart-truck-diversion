@@ -47,6 +47,175 @@ COPPER_PRICE_PER_TONNE = 8820  # $4/lb
 METALLURGICAL_RECOVERY = 0.85  # 85%
 
 # =============================================================================
+# SCHEMA DEFINITIONS WITH COLUMN COMMENTS
+# =============================================================================
+# Column comments are embedded in schema metadata for Unity Catalog discovery
+
+def _meta(comment: str) -> dict:
+    """Helper to create metadata dict with comment."""
+    return {"comment": comment}
+
+
+def apply_column_comments(df, schema: StructType):
+    """
+    Apply column comments from schema metadata to DataFrame.
+
+    This ensures column comments defined in the schema are preserved
+    when the DataFrame is written to Unity Catalog.
+    """
+    # Build select expressions with metadata
+    select_exprs = []
+    schema_dict = {f.name: f for f in schema.fields}
+
+    for col_name in df.columns:
+        if col_name in schema_dict:
+            field = schema_dict[col_name]
+            # Cast to correct type and apply metadata via alias
+            select_exprs.append(
+                df[col_name].cast(field.dataType).alias(col_name, metadata=field.metadata)
+            )
+        else:
+            # Keep column as-is if not in schema
+            select_exprs.append(df[col_name])
+
+    return df.select(select_exprs)
+
+# Schema for dim_block_model - the key dimension with mineralogy data
+DIM_BLOCK_MODEL_SCHEMA = StructType([
+    StructField("block_id", StringType(), True, _meta("Primary key. Unique identifier for geological block.")),
+    StructField("bench", IntegerType(), True, _meta("Mining bench level (elevation tier).")),
+    StructField("easting", DoubleType(), True, _meta("X coordinate in mine grid (meters).")),
+    StructField("northing", DoubleType(), True, _meta("Y coordinate in mine grid (meters).")),
+    StructField("elevation", DoubleType(), True, _meta("Z coordinate / elevation (meters).")),
+    StructField("planned_cu_grade", DoubleType(), True, _meta("Copper grade (%) from blast hole sampling. Used as ground truth for classification.")),
+    StructField("planned_fe_grade", DoubleType(), True, _meta("Iron grade (%) from blast hole sampling.")),
+    StructField("planned_classification", StringType(), True, _meta("ORE or WASTE based on 0.32% Cu cutoff grade.")),
+    StructField("geological_domain", StringType(), True, _meta("Zonation: BORNITE_CORE, CHALCOPYRITE_ZONE, PYRITE_HALO, etc. From Round 1 deposit model.")),
+    StructField("is_dyke", BooleanType(), True, _meta("Whether block intersects a barren dyke.")),
+    StructField("blast_movement_m", DoubleType(), True, _meta("Estimated blast-induced movement (meters). Source of grade control error per AusIMM 2008.")),
+    StructField("is_ore", BooleanType(), True, _meta("True if planned_cu_grade >= 0.32% cutoff.")),
+    StructField("grade_bin", StringType(), True, _meta("Grade category: HIGH (>=1%), MEDIUM (>=0.5%), LOW (>=0.32%), WASTE (<0.32%).")),
+    StructField("block_volume_m3", IntegerType(), True, _meta("Block volume in cubic meters (15m x 15m x 15m = 3,375 m3).")),
+    StructField("chalcopyrite_pct", DoubleType(), True, _meta("Chalcopyrite (CuFeS2) percentage. ~80% average per Round 1. Has 30.5% Fe causing matrix effects.")),
+    StructField("bornite_pct", DoubleType(), True, _meta("Bornite (Cu5FeS4) percentage. ~20% average per Round 1. Higher Cu content, lower matrix effect.")),
+    StructField("mineralogy_class", StringType(), True, _meta("BORNITE_DOMINANT (>50% bornite), CHALCOPYRITE_DOMINANT (>70% chalcopyrite), or MIXED.")),
+    StructField("surface_volume_correlation", DoubleType(), True, _meta("Estimated correlation between surface XRF readings and volumetric grade. THE CRITICAL UNKNOWN from Round 1.")),
+    StructField("sv_correlation_quality", StringType(), True, _meta("HIGH (>=0.70), MODERATE (0.50-0.70), or LOW (<0.50). Predicts XRF reliability.")),
+    StructField("nugget_effect_variance", DoubleType(), True, _meta("Short-scale grade variability. High values indicate erratic grades within blocks.")),
+    StructField("vein_density_class", StringType(), True, _meta("LOW, MEDIUM, or HIGH vein density. Affects heterogeneity error.")),
+    StructField("_updated_at", TimestampType(), True, _meta("Timestamp when record was last updated.")),
+])
+
+# Schema for fact_truck_loads - the central fact table
+FACT_TRUCK_LOADS_SCHEMA = StructType([
+    StructField("load_id", StringType(), True, _meta("Primary key. Unique identifier for truck load.")),
+    StructField("load_date_key", IntegerType(), True, _meta("Foreign key to dim_date (YYYYMMDD format).")),
+    StructField("shovel_id", StringType(), True, _meta("Foreign key to dim_shovels.")),
+    StructField("truck_id", StringType(), True, _meta("Foreign key to dim_trucks.")),
+    StructField("block_id", StringType(), True, _meta("Foreign key to dim_block_model. Source block for this load.")),
+    StructField("timestamp", TimestampType(), True, _meta("Load timestamp (when truck departed shovel).")),
+    StructField("load_date", DateType(), True, _meta("Date portion of timestamp.")),
+    StructField("load_hour", IntegerType(), True, _meta("Hour portion of timestamp (0-23).")),
+    StructField("shift", StringType(), True, _meta("DAY (6am-6pm) or NIGHT (6pm-6am).")),
+    StructField("day_of_week", IntegerType(), True, _meta("1=Sunday through 7=Saturday.")),
+    StructField("is_weekend", BooleanType(), True, _meta("True if Saturday or Sunday.")),
+    StructField("n_buckets", LongType(), True, _meta("Number of bucket passes to fill truck (typically 4-6).")),
+    StructField("avg_cu_grade_pct", DoubleType(), True, _meta("Average XRF-measured copper grade across all buckets.")),
+    StructField("avg_fe_grade_pct", DoubleType(), True, _meta("Average XRF-measured iron grade across all buckets.")),
+    StructField("payload_tonnes", DoubleType(), True, _meta("Actual payload weight in tonnes.")),
+    StructField("cycle_time_minutes", DoubleType(), True, _meta("Total cycle time (load + haul + dump + return).")),
+    StructField("estimated_cu_tonnes", DoubleType(), True, _meta("Contained copper tonnes = payload x grade / 100.")),
+    StructField("avg_xrf_confidence", DoubleType(), True, _meta("Average XRF confidence score across buckets (0-1).")),
+    StructField("surface_volume_correlation", DoubleType(), True, _meta("S-V correlation for source block. Predicts XRF accuracy.")),
+    StructField("sv_correlation_quality", StringType(), True, _meta("HIGH, MODERATE, or LOW based on S-V correlation thresholds.")),
+    StructField("xrf_reliability", StringType(), True, _meta("Composite reliability: HIGH (conf>=0.90 AND sv>=0.60), MODERATE, or LOW.")),
+    StructField("geological_domain", StringType(), True, _meta("Source block geological domain for stratified analysis.")),
+    StructField("estimated_cu_value_usd", DoubleType(), True, _meta("Economic value = payload x grade x 0.85 recovery x $8,820/t Cu. From Round 3.")),
+    StructField("planned_classification", StringType(), True, _meta("ORE or WASTE from blast hole model (ground truth).")),
+    StructField("shovelsense_classification", StringType(), True, _meta("ORE or WASTE from XRF measurement (sensor decision).")),
+    StructField("diversion_type", StringType(), True, _meta("ALIGNED (agreement), ORE_FROM_WASTE (false positive), WASTE_FROM_ORE (false negative).")),
+    StructField("destination", StringType(), True, _meta("MILL or WASTE_DUMP based on ShovelSense classification.")),
+    StructField("grade_bin", StringType(), True, _meta("Grade category based on avg_cu_grade_pct.")),
+    StructField("is_diverted", BooleanType(), True, _meta("True if planned != shovelsense classification.")),
+    StructField("is_ore_recovery", BooleanType(), True, _meta("True if diversion_type = ORE_FROM_WASTE (value capture).")),
+    StructField("is_dilution_prevention", BooleanType(), True, _meta("True if diversion_type = WASTE_FROM_ORE (dilution avoided).")),
+])
+
+# Schema for fact_bucket_measurements
+FACT_BUCKET_MEASUREMENTS_SCHEMA = StructType([
+    StructField("measurement_id", StringType(), True, _meta("Primary key. Unique identifier for XRF measurement.")),
+    StructField("measurement_date_key", IntegerType(), True, _meta("Foreign key to dim_date.")),
+    StructField("shovel_id", StringType(), True, _meta("Foreign key to dim_shovels.")),
+    StructField("truck_id", StringType(), True, _meta("Foreign key to dim_trucks.")),
+    StructField("block_id", StringType(), True, _meta("Foreign key to dim_block_model.")),
+    StructField("timestamp", TimestampType(), True, _meta("Measurement timestamp.")),
+    StructField("measurement_date", DateType(), True, _meta("Date portion of timestamp.")),
+    StructField("measurement_hour", IntegerType(), True, _meta("Hour portion of timestamp.")),
+    StructField("bucket_number", LongType(), True, _meta("Sequential bucket number within truck load (1-6).")),
+    StructField("cu_grade_pct", DoubleType(), True, _meta("XRF-measured copper grade (%).")),
+    StructField("fe_grade_pct", DoubleType(), True, _meta("XRF-measured iron grade (%).")),
+    StructField("zn_grade_ppm", DoubleType(), True, _meta("XRF-measured zinc grade (ppm).")),
+    StructField("as_grade_ppm", DoubleType(), True, _meta("XRF-measured arsenic grade (ppm). Penalty element.")),
+    StructField("laser_fill_level_pct", DoubleType(), True, _meta("Bucket fill level from laser sensor (%).")),
+    StructField("xrf_confidence", DoubleType(), True, _meta("XRF measurement confidence score (0-1). Higher = more reliable.")),
+    StructField("matrix_effect_factor", DoubleType(), True, _meta("Fe-Cu absorption correction factor. <1.0 indicates significant matrix effect.")),
+    StructField("matrix_effect_severity", StringType(), True, _meta("HIGH (<0.95), MODERATE (0.95-0.98), or LOW (>0.98) matrix effect.")),
+    StructField("measurement_quality_score", DoubleType(), True, _meta("Composite: 0.5 x confidence + 0.3 x matrix_factor + 0.2 x dual_sensor.")),
+    StructField("sensor_head_1_active", BooleanType(), True, _meta("True if primary XRF sensor was active.")),
+    StructField("sensor_head_2_active", BooleanType(), True, _meta("True if secondary XRF sensor was active.")),
+    StructField("both_sensors_active", BooleanType(), True, _meta("True if dual-sensor redundancy was available.")),
+    StructField("is_high_confidence", BooleanType(), True, _meta("True if xrf_confidence >= 0.90.")),
+    StructField("grade_category", StringType(), True, _meta("HIGH_GRADE, MEDIUM_GRADE, LOW_GRADE, or WASTE based on cu_grade_pct.")),
+])
+
+# Schema for fact_classification_accuracy
+FACT_CLASSIFICATION_ACCURACY_SCHEMA = StructType([
+    StructField("load_date", DateType(), True, _meta("Date for this accuracy record.")),
+    StructField("load_date_key", IntegerType(), True, _meta("Foreign key to dim_date.")),
+    StructField("total_loads", LongType(), True, _meta("Total truck loads on this date.")),
+    StructField("true_positive", LongType(), True, _meta("Planned=ORE, XRF=ORE. Correct ore identification.")),
+    StructField("true_negative", LongType(), True, _meta("Planned=WASTE, XRF=WASTE. Correct waste identification.")),
+    StructField("false_positive", LongType(), True, _meta("Planned=WASTE, XRF=ORE. Ore from Waste (value capture).")),
+    StructField("false_negative", LongType(), True, _meta("Planned=ORE, XRF=WASTE. Waste from Ore (dilution prevention or lost ore).")),
+    StructField("accuracy", DoubleType(), True, _meta("(TP + TN) / Total. Overall classification accuracy.")),
+    StructField("precision_ore", DoubleType(), True, _meta("TP / (TP + FP). Of loads sent to mill, what % were actually ore?")),
+    StructField("recall_ore", DoubleType(), True, _meta("TP / (TP + FN). Of actual ore loads, what % were correctly identified?")),
+    StructField("f1_score", DoubleType(), True, _meta("2 x Precision x Recall / (Precision + Recall). Harmonic mean. Key metric from Round 2.")),
+])
+
+# Schema for fact_daily_diversions
+FACT_DAILY_DIVERSIONS_SCHEMA = StructType([
+    StructField("load_date", DateType(), True, _meta("Date for this diversion record.")),
+    StructField("load_date_key", IntegerType(), True, _meta("Foreign key to dim_date.")),
+    StructField("shovel_id", StringType(), True, _meta("Foreign key to dim_shovels.")),
+    StructField("total_trucks", LongType(), True, _meta("Total truck loads from this shovel on this date.")),
+    StructField("diverted_trucks", LongType(), True, _meta("Loads where planned != shovelsense classification.")),
+    StructField("ore_from_waste_count", LongType(), True, _meta("Loads diverted from waste dump to mill (value capture).")),
+    StructField("waste_from_ore_count", LongType(), True, _meta("Loads diverted from mill to waste dump (dilution prevention).")),
+    StructField("avg_cu_grade", DoubleType(), True, _meta("Average copper grade for loads from this shovel.")),
+    StructField("total_tonnes", DoubleType(), True, _meta("Total payload tonnes from this shovel.")),
+    StructField("total_cu_tonnes", DoubleType(), True, _meta("Total contained copper tonnes.")),
+    StructField("avg_cycle_time", DoubleType(), True, _meta("Average truck cycle time in minutes.")),
+    StructField("diversion_rate", DoubleType(), True, _meta("diverted_trucks / total_trucks. Target ~11% per white paper.")),
+    StructField("ore_recovery_rate", DoubleType(), True, _meta("ore_from_waste_count / total_trucks. Target ~6.4% per white paper.")),
+    StructField("dilution_prevention_rate", DoubleType(), True, _meta("waste_from_ore_count / total_trucks. Target ~4.7% per white paper.")),
+])
+
+# Schema for fact_sv_correlation_analysis
+FACT_SV_CORRELATION_SCHEMA = StructType([
+    StructField("sv_corr_bin", StringType(), True, _meta("Surface-volume correlation bin: 0.70-1.00 (high), 0.55-0.70, 0.40-0.55, 0.00-0.40 (low).")),
+    StructField("total_loads", LongType(), True, _meta("Total truck loads in this S-V correlation bin.")),
+    StructField("correct_classifications", LongType(), True, _meta("Loads where planned = shovelsense classification.")),
+    StructField("ore_from_waste", LongType(), True, _meta("Ore from Waste diversions in this bin.")),
+    StructField("waste_from_ore", LongType(), True, _meta("Waste from Ore diversions in this bin.")),
+    StructField("avg_xrf_confidence", DoubleType(), True, _meta("Average XRF confidence in this bin.")),
+    StructField("avg_sv_correlation", DoubleType(), True, _meta("Average S-V correlation in this bin.")),
+    StructField("total_cu_value_usd", DoubleType(), True, _meta("Total copper value in this bin.")),
+    StructField("accuracy_rate", DoubleType(), True, _meta("correct_classifications / total_loads. Should increase with S-V correlation.")),
+    StructField("diversion_rate", DoubleType(), True, _meta("1 - accuracy_rate. Should decrease with S-V correlation.")),
+])
+
+# =============================================================================
 # BRONZE LAYER - Raw Ingestion
 # =============================================================================
 
@@ -382,7 +551,7 @@ def dim_block_model():
     - Surface-volume correlation (key XRF accuracy predictor)
     - Vein density (affects heterogeneity error)
     """
-    return (
+    df = (
         spark.read.table("silver_block_model")
         .select(
             F.col("block_id"),
@@ -412,6 +581,7 @@ def dim_block_model():
             F.current_timestamp().alias("_updated_at")
         )
     )
+    return apply_column_comments(df, DIM_BLOCK_MODEL_SCHEMA)
 
 
 @dp.table(
@@ -473,7 +643,7 @@ def fact_bucket_measurements():
     - Matrix effects: Fe absorbs Cu X-rays (chalcopyrite has 30.5% Fe)
     - Heterogeneity error: Surface may not represent volume
     """
-    return (
+    df = (
         spark.read.table("silver_bucket_measurements")
         .select(
             # Keys
@@ -506,6 +676,7 @@ def fact_bucket_measurements():
             F.col("grade_category")
         )
     )
+    return apply_column_comments(df, FACT_BUCKET_MEASUREMENTS_SCHEMA)
 
 
 @dp.table(
@@ -523,7 +694,7 @@ def fact_truck_loads():
     - avg_xrf_confidence: Sensor reliability indicator
     - estimated_cu_value_usd: Economic impact per load (Round 3)
     """
-    return (
+    df = (
         spark.read.table("silver_truck_loads")
         .select(
             # Keys
@@ -567,6 +738,7 @@ def fact_truck_loads():
             F.col("is_dilution_prevention")
         )
     )
+    return apply_column_comments(df, FACT_TRUCK_LOADS_SCHEMA)
 
 
 # =============================================================================
@@ -579,7 +751,7 @@ def fact_truck_loads():
 )
 def fact_daily_diversions():
     """Aggregate daily diversion statistics."""
-    return (
+    df = (
         spark.read.table("fact_truck_loads")
         .groupBy("load_date", "load_date_key", "shovel_id")
         .agg(
@@ -599,6 +771,7 @@ def fact_daily_diversions():
         .withColumn("dilution_prevention_rate",
             F.col("waste_from_ore_count") / F.col("total_trucks"))
     )
+    return apply_column_comments(df, FACT_DAILY_DIVERSIONS_SCHEMA)
 
 
 @dp.materialized_view(
@@ -607,7 +780,7 @@ def fact_daily_diversions():
 )
 def fact_classification_accuracy():
     """Calculate classification accuracy metrics."""
-    return (
+    df = (
         spark.read.table("fact_truck_loads")
         .groupBy("load_date", "load_date_key")
         .agg(
@@ -643,6 +816,7 @@ def fact_classification_accuracy():
             2 * F.col("precision_ore") * F.col("recall_ore") /
             (F.col("precision_ore") + F.col("recall_ore")))
     )
+    return apply_column_comments(df, FACT_CLASSIFICATION_ACCURACY_SCHEMA)
 
 
 @dp.materialized_view(
@@ -773,7 +947,7 @@ def fact_sv_correlation_analysis():
     This view helps answer: Does higher surface-volume correlation
     lead to better classification accuracy?
     """
-    return (
+    df = (
         spark.read.table("fact_truck_loads")
         .withColumn("sv_corr_bin",
             F.when(F.col("surface_volume_correlation") >= 0.70, "0.70-1.00")
@@ -796,6 +970,7 @@ def fact_sv_correlation_analysis():
         .withColumn("diversion_rate",
             1 - F.col("accuracy_rate"))
     )
+    return apply_column_comments(df, FACT_SV_CORRELATION_SCHEMA)
 
 
 # =============================================================================
