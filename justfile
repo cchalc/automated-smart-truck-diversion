@@ -94,6 +94,18 @@ deploy:
     @echo "Deploying Databricks Asset Bundle..."
     set -x DATABRICKS_TF_EXEC_PATH /tmp/terraform; set -x DATABRICKS_TF_VERSION 1.9.8; cd bundles && databricks bundle deploy --profile {{DATABRICKS_CONFIG_PROFILE}}
 
+# Upload analysis notebooks to workspace
+upload-notebooks:
+    @echo "Uploading analysis notebooks to workspace..."
+    databricks workspace mkdirs /Workspace/Users/christopher.chalcraft@databricks.com/shovelsense --profile {{DATABRICKS_CONFIG_PROFILE}}; or true
+    for dir in notebooks/*/; databricks workspace import-dir $dir /Workspace/Users/christopher.chalcraft@databricks.com/shovelsense/(basename $dir) --profile {{DATABRICKS_CONFIG_PROFILE}} --overwrite; end
+    @echo "Notebooks uploaded!"
+    @echo "View at: {{DATABRICKS_HOST}}/#workspace/Users/christopher.chalcraft@databricks.com/shovelsense"
+
+# Deploy everything (bundle + notebooks)
+deploy-all: deploy upload-notebooks
+    @echo "Full deployment complete!"
+
 # Run deployed jobs
 run-pipeline:
     @echo "Running data pipeline..."

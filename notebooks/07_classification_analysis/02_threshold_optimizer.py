@@ -24,9 +24,16 @@ import numpy as np
 from pyspark.sql import functions as F
 from sklearn.metrics import roc_curve, auc, precision_recall_curve
 
-# Configuration
-CATALOG = spark.conf.get("catalog", "cjc_aws_workspace_catalog")
-SCHEMA = spark.conf.get("schema", "shovelsense")
+# Configuration - serverless compute doesn't support custom spark.conf keys
+try:
+    CATALOG = spark.conf.get("catalog")
+except Exception:
+    CATALOG = "cjc_aws_workspace_catalog"
+
+try:
+    SCHEMA = spark.conf.get("schema")
+except Exception:
+    SCHEMA = "shovelsense"
 
 # Economic parameters
 COPPER_PRICE = 8820  # $/tonne

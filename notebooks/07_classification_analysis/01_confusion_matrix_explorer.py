@@ -28,8 +28,16 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 # Configuration - adjust to your catalog/schema
-CATALOG = spark.conf.get("catalog", "cjc_aws_workspace_catalog")
-SCHEMA = spark.conf.get("schema", "shovelsense")
+# Note: spark.conf.get throws CONFIG_NOT_AVAILABLE on serverless for custom keys
+try:
+    CATALOG = spark.conf.get("catalog")
+except Exception:
+    CATALOG = "cjc_aws_workspace_catalog"
+
+try:
+    SCHEMA = spark.conf.get("schema")
+except Exception:
+    SCHEMA = "shovelsense"
 
 # Economic parameters from Round 3 Direction C
 COPPER_PRICE_PER_TONNE = 8820  # $4/lb = $8,820/tonne
