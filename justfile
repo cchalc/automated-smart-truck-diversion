@@ -49,7 +49,7 @@ create-infra:
 # Generate synthetic XRF and mining operations data
 generate-data:
     @echo "Generating synthetic mining data..."
-    $HOME/.virtualenvs/automated-smart-truck-diversion/bin/python scripts/generate_mining_data.py
+    $UV_PROJECT_ENVIRONMENT/bin/python scripts/generate_mining_data.py
     @echo "Data generation complete!"
 
 # Upload generated data to Databricks Volume
@@ -67,20 +67,20 @@ generate-pdfs:
 # Validate generated data (exit 0=pass, 1=errors, 2=warnings only)
 validate-data:
     @echo "Validating generated data..."
-    $HOME/.virtualenvs/automated-smart-truck-diversion/bin/python scripts/validate_data.py; or test $status -eq 2
+    $UV_PROJECT_ENVIRONMENT/bin/python scripts/validate_data.py; or test $status -eq 2
 
 # Run pytest tests
 test:
     @echo "Running pytest..."
-    $HOME/.virtualenvs/automated-smart-truck-diversion/bin/pytest tests/ -v
+    $UV_PROJECT_ENVIRONMENT/bin/pytest tests/ -v
 
 # Run all validation (validate-data + test)
 validate-all:
     @echo "Running data validation..."
-    $HOME/.virtualenvs/automated-smart-truck-diversion/bin/python scripts/validate_data.py; or test $status -eq 2
+    $UV_PROJECT_ENVIRONMENT/bin/python scripts/validate_data.py; or test $status -eq 2
     @echo ""
     @echo "Running pytest..."
-    $HOME/.virtualenvs/automated-smart-truck-diversion/bin/pytest tests/ -v
+    $UV_PROJECT_ENVIRONMENT/bin/pytest tests/ -v
     @echo ""
     @echo "All validations complete!"
 
@@ -114,7 +114,7 @@ run-pipeline:
 # Apply table and column descriptions to Delta tables
 apply-metadata:
     @echo "Applying table and column metadata..."
-    set -x CATALOG {{CATALOG}}; set -x SCHEMA {{SCHEMA}}; set -x WAREHOUSE_ID {{WAREHOUSE_ID}}; set -x DATABRICKS_CONFIG_PROFILE {{DATABRICKS_CONFIG_PROFILE}}; $HOME/.virtualenvs/automated-smart-truck-diversion/bin/python scripts/apply_table_metadata.py
+    set -x CATALOG {{CATALOG}}; set -x SCHEMA {{SCHEMA}}; set -x WAREHOUSE_ID {{WAREHOUSE_ID}}; set -x DATABRICKS_CONFIG_PROFILE {{DATABRICKS_CONFIG_PROFILE}}; $UV_PROJECT_ENVIRONMENT/bin/python scripts/apply_table_metadata.py
 
 # Full pipeline: setup -> create-infra -> generate-data -> generate-pdfs -> deploy
 all: setup create-infra generate-data generate-pdfs deploy
